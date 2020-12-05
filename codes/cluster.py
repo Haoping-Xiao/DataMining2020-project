@@ -1,7 +1,7 @@
 import pandas as pd
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans, AgglomerativeClustering, SpectralClustering
+from sklearn.cluster import KMeans, AgglomerativeClustering, SpectralClustering, SpectralBiclustering, SpectralCoclustering, Birch
 from sklearn.metrics import normalized_mutual_info_score
 from sklearn.model_selection import GridSearchCV
 from sklearn_extra.cluster import KMedoids
@@ -56,7 +56,8 @@ class Preprocess:
     def pca(self, n_components):
         model = PCA(n_components=n_components)
         reduced_data = model.fit_transform(self.data)
-        print(model.explained_variance_ratio_)
+        print('pca explained_variance_ratio_ is {}'.format(
+            model.explained_variance_ratio_))
         return reduced_data
 
 
@@ -80,16 +81,37 @@ class Cluster:
     def kmedoids(self):
         self.model = KMedoids(n_clusters=self.n_clusters)
 
-    def agglomerative(self,linkage, affinity):
-        self.model = AgglomerativeClustering(n_clusters=self.n_clusters,linkage=linkage, affinity=affinity)
+    def agglomerative(self, linkage, affinity):
+        self.model = AgglomerativeClustering(
+            n_clusters=self.n_clusters, linkage=linkage, affinity=affinity)
+
+    def birch(self):
+        #acc is 0.87
+        self.model = Birch(n_clusters=self.n_clusters)
 
     def spectral(self):
         self.model = SpectralClustering(n_clusters=self.n_clusters)
 
-    def goodness(self, true_labels):
+    def spectral_biclustering(self):
+        self.model = SpectralBiclustering(n_clusters=self.n_clusters)
+
+    def spectral_coclustering(self):
+        self.model = SpectralCoclustering(n_clusters=self.n_clusters)
+
+    def fit_model(self):
         # fit model and predict
         self.model.fit(self.feature_vectors)
-        self.predicted_labels = self.model.labels_
+        try:
+            self.predicted_labels = self.model.labels_
+        except AttributeError:
+            # spectral_biclustering and Coclustering
+            print(self.model.row_labels_.shape)
+            self.predicted_labels = self.model.row_labels_
+        except Exception:
+            print(Exception)
+
+    def goodness(self, true_labels):
+        self.fit_model()
         # evaluate performance
         normalized_mutual_info = normalized_mutual_info_score(
             true_labels, self.predicted_labels)
@@ -97,20 +119,21 @@ class Cluster:
         print('current project can get {:d} points'.format(int(points)))
         return normalized_mutual_info
 
-def try_agglomerative_params(cluster,labels):
+
+def try_agglomerative_params(cluster, labels):
     #result: ward and euclidean
-    linkages=["ward", "complete", "average", "single"]
-    affinitys=["euclidean", "l1", "l2", "manhattan", "cosine", "precomputed"]
-    best_result=0
-    best_params={'linkage':'','affinity':''}
-    for linkage, affinity in product(linkages,affinitys):
+    linkages = ["ward", "complete", "average", "single"]
+    affinitys = ["euclidean", "l1", "l2", "manhattan", "cosine", "precomputed"]
+    best_result = 0
+    best_params = {'linkage': '', 'affinity': ''}
+    for linkage, affinity in product(linkages, affinitys):
         try:
             cluster.agglomerative(linkage=linkage, affinity=affinity)
-            result=cluster.goodness(labels)
-            if result>best_result:
-                best_result=result
-                best_params['linkage']=linkage
-                best_params['affinity']=affinity
+            result = cluster.goodness(labels)
+            if result > best_result:
+                best_result = result
+                best_params['linkage'] = linkage
+                best_params['affinity'] = affinity
         except Exception as error:
             print(error)
             continue
@@ -125,9 +148,16 @@ if __name__ == "__main__":
     # print(data.gene_feature_vectors)
     preprocess_gene = Preprocess(feature_vectors=data.gene_feature_vectors)
     # normalized_gene=preprocess_gene.normalize()
-    # reduced_gene = preprocess_gene.pca(n_components=20)
-    cluster = Cluster(n_clusters=5, feature_vectors=data.gene_feature_vectors)
+    reduced_gene = preprocess_gene.pca(n_components=20)
+    cluster = Cluster(n_clusters=5, feature_vectors=reduced_gene)
     # cluster.kmeans()
-    # cluster.agglomerative()
-    try_agglomerative_params(cluster,data.gene_labels)
-    # print(cluster.goodness(data.gene_labels))
+    # cluster.agglomerative(linkage='ward', affinity='euclidean')
+    # cluster.spectral_coclustering()
+    cluster.birch()
+    # try_agglomerative_params(cluster,data.gene_labels)
+    print(cluster.goodness(data.gene_labels))
+
+    # preprocess_ms= Preprocess(feature_vectors=data.ms_feature_vectors)
+    ms_cluster = Cluster(n_clusters=3, feature_vectors=data.ms_feature_vectors)
+    ms_cluster.agglomerative(linkage='ward', affinity='euclidean')
+    print(ms_cluster.goodness(data.ms_labels))
