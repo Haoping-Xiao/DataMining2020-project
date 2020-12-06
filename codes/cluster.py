@@ -3,9 +3,8 @@ from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans, AgglomerativeClustering, SpectralClustering, SpectralBiclustering, SpectralCoclustering, Birch
-from sklearn.metrics import normalized_mutual_info_score, pairwise_distances
+from sklearn.metrics import normalized_mutual_info_score, pairwise_distances, pairwise
 from sklearn.model_selection import GridSearchCV
-from sklearn_extra.cluster import KMedoids
 from itertools import product, combinations
 import numpy as np
 
@@ -50,8 +49,15 @@ class Preprocess:
     def __init__(self, feature_vectors):
         self.data = feature_vectors
 
-    def normalize(self):
-        self.data = (self.data-self.data.mean())/self.data.std()
+    def normalize_vertical(self):
+        self.data = (self.data-self.data.min()) / \
+            (self.data.max()-self.data.min())
+        return self.data
+
+    def normalize_horizontal(self):
+        scale = self.data.max(axis=1)-self.data.min(axis=1)
+        self.data = self.data.sub(self.data.min(
+            axis=1), axis=0).div(scale, axis=0)
         return self.data
 
     def get_affinity(self, metric='euclidean', with_diag=True):
@@ -73,15 +79,16 @@ class Preprocess:
         reduced_data = model.fit_transform(self.data)
         # print('pca explained_variance_ratio_ is {}'.format(
         #     model.explained_variance_ratio_))
-        return model.explained_variance_ratio_, reduced_data
+        return reduced_data
 
 
 def visualize2D(data):
     """ 
       input: 2d Data
     """
+    # print(data.iloc[0,:])
     plt.figure()
-    plt.scatter(data[:, 0], data[:, 1])
+    plt.plot(data.iloc[0, :])
     plt.show()
 
 
@@ -117,11 +124,6 @@ class Comparison:
             axes[index].hist(data[index], range=self.x_range, bins=25)
         fig.suptitle(title)
         plt.show()
-
-    # def get_mean_nearest_dist(self, pair_distance, k_nearest):
-    #     sort_pair_distance = np.sort(pair_distance, axis=1)
-    #     res = np.mean(sort_pair_distance[:, :k_nearest-1], axis=1)
-    #     return res
 
     def get_affinity(self, data, with_diag=True):
         """ 
@@ -218,9 +220,6 @@ class Cluster:
     def kmeans(self):
         self.model = KMeans(n_clusters=self.n_clusters)
 
-    def kmedoids(self):
-        self.model = KMedoids(n_clusters=self.n_clusters)
-
     def agglomerative(self, linkage, affinity):
         self.model = AgglomerativeClustering(
             n_clusters=self.n_clusters, linkage=linkage, affinity=affinity)
@@ -229,9 +228,9 @@ class Cluster:
         #acc is 0.87
         self.model = Birch(n_clusters=self.n_clusters)
 
-    def spectral(self, affinity, n_neighbors):
+    def spectral(self, affinity, n_neighbors=None):
         self.model = SpectralClustering(
-            n_clusters=self.n_clusters, affinity =affinity, n_neighbors=n_neighbors)
+            n_clusters=self.n_clusters, affinity=affinity, n_neighbors=n_neighbors)
 
     def spectral_biclustering(self):
         self.model = SpectralBiclustering(n_clusters=self.n_clusters)
@@ -250,6 +249,10 @@ class Cluster:
             self.predicted_labels = self.model.row_labels_
         except Exception:
             print(Exception)
+
+    def save_result(self, file_path):
+        np.savetxt('{}'.format(file_path),
+                   self.predicted_labels.astype(int), fmt='%i')
 
     def goodness(self, true_labels):
         self.fit_model()
@@ -286,24 +289,28 @@ def try_agglomerative_params(cluster, labels):
 if __name__ == "__main__":
     data = LoadData(genedata_path='../data/genedata.csv',
                     msdata_path='../data/msdata.csv', first_feature_index=2)
-    gene_cluster = Cluster(n_clusters=5, feature_vectors=data.gene_feature_vectors)
-    gene_cluster.spectral(affinity = 'nearest_neighbors', n_neighbors=6)
+    gene_cluster = Cluster(
+        n_clusters=5, feature_vectors=data.gene_feature_vectors)
+    gene_cluster.spectral(affinity='nearest_neighbors', n_neighbors=6)
     print(gene_cluster.goodness(data.gene_labels))
+    gene_cluster.save_result(file_path='../results/gene_results.txt')
 
+    # visualize2D(data.ms_feature_vectors)
     preprocess_ms = Preprocess(feature_vectors=data.ms_feature_vectors)
-    # preprocess_ms.normalize()
-    ratio, reduced_ms = preprocess_ms.pca(n_components=500)
-    weighted_ms = reduced_ms*np.sqrt(ratio)
+    # normalized_ms=preprocess_ms.normalize_horizontal()
+    # visualize2D(normalized_ms)
+    reduced_ms = preprocess_ms.pca(n_components=694)
     # ms_affinity=preprocess_ms.get_affinity(metric='manhattan')
-    print(weighted_ms.shape)
-    comparison = Comparison(reduced_ms, data.ms_labels,
-                            metric='euclidean', x_range=[0, 400])
+    # comparison = Comparison(reduced_ms, data.ms_labels,
+    #                         metric='mahalanobis', x_range=[0, 100])
 
-    comparison.compare_pair_dist(isShow=True)
-    comparison.compare_nearest_dist()
-    comparison.compare_between_class_dist()
-    comparison.compare_nearest_dist_other_class()
-    # hist(data.ms_feature_vectors,data.ms_labels,plot_nearest=True)
-    # ms_cluster = Cluster(n_clusters=3, feature_vectors=weighted_ms)
-    # ms_cluster.kmeans()
-    # print(ms_cluster.goodness(data.ms_labels))
+    # comparison.compare_pair_dist(isShow=True)
+    # comparison.compare_nearest_dist()
+    # comparison.compare_between_class_dist()
+    # comparison.compare_nearest_dist_other_class()
+    cos_dist = pairwise.cosine_distances(reduced_ms)
+    ms_cluster = Cluster(n_clusters=3, feature_vectors=cos_dist)
+    ms_cluster.spectral(
+        affinity='precomputed_nearest_neighbors', n_neighbors=177)
+    print(ms_cluster.goodness(data.ms_labels))
+    ms_cluster.save_result(file_path='../results/ms_results.txt')
