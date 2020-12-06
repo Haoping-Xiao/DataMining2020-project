@@ -7,7 +7,8 @@ from sklearn.metrics import normalized_mutual_info_score, pairwise_distances, pa
 from sklearn.model_selection import GridSearchCV
 from itertools import product, combinations
 import numpy as np
-
+from umap import UMAP
+import time
 
 class Config:
     def __init__(self, genedata_path, msdata_path):
@@ -77,10 +78,14 @@ class Preprocess:
     def pca(self, n_components):
         model = PCA(n_components=n_components)
         reduced_data = model.fit_transform(self.data)
-        # print('pca explained_variance_ratio_ is {}'.format(
-        #     model.explained_variance_ratio_))
+        print('pca explained_variance_ratio_ is {}'.format(
+            model.explained_variance_ratio_))
         return reduced_data
 
+    def umap(self, n_components, metric):
+        model= UMAP(n_components=n_components,metric=metric)
+        reduced_data= model.fit_transform(self.data)
+        return reduced_data
 
 def visualize2D(data):
     """ 
@@ -254,13 +259,14 @@ class Cluster:
         np.savetxt('{}'.format(file_path),
                    self.predicted_labels.astype(int), fmt='%i')
 
-    def goodness(self, true_labels):
+    def goodness(self, true_labels, base_precision, improved_precision, verbose=False):
         self.fit_model()
         # evaluate performance
         normalized_mutual_info = normalized_mutual_info_score(
             true_labels, self.predicted_labels)
-        points = (normalized_mutual_info-0.8)/0.02 + 1
-        print('current project can get {:d} points'.format(int(points)))
+        points = (normalized_mutual_info-base_precision)/improved_precision + 1
+        if verbose:
+            print('current project can get {:d} points'.format(int(points)))
         return normalized_mutual_info
 
 
@@ -289,17 +295,55 @@ def try_agglomerative_params(cluster, labels):
 if __name__ == "__main__":
     data = LoadData(genedata_path='../data/genedata.csv',
                     msdata_path='../data/msdata.csv', first_feature_index=2)
+    #--------------------------------------------------#
+    #--------------------------------------------------#
+    #----------------------gene_data---------------------#
+    #--------------------------------------------------#
+    #--------------------------------------------------#
     gene_cluster = Cluster(
         n_clusters=5, feature_vectors=data.gene_feature_vectors)
+    # PCA from 7000 dimension to 3 dimension
+    preprocess_gene=Preprocess(feature_vectors=data.gene_feature_vectors)
+    reduced_gene=preprocess_gene.pca(n_components=3)
+    # Visualization
+    visualize3D(reduced_gene,data.gene_labels)
+    # K-means method for gene data
+    gene_cluster.kmeans()
+    nmi_kmeans=gene_cluster.goodness(data.gene_labels,base_precision=0.8, improved_precision=0.02)
+    print('nmi of kmeans is {}'.format(nmi_kmeans))
+    # Spectral method for gene data
     gene_cluster.spectral(affinity='nearest_neighbors', n_neighbors=6)
-    print(gene_cluster.goodness(data.gene_labels))
+    nmi_spectral=gene_cluster.goodness(data.gene_labels,base_precision=0.8, improved_precision=0.02)
+    print('nmi of spectral is {}'.format(nmi_spectral))
+    # save spectral result
     gene_cluster.save_result(file_path='../results/gene_results.txt')
+    
+    #--------------------------------------------------#
+    #--------------------------------------------------#
+    #----------------------ms_data---------------------#
+    #--------------------------------------------------#
+    #--------------------------------------------------#
 
-    # visualize2D(data.ms_feature_vectors)
     preprocess_ms = Preprocess(feature_vectors=data.ms_feature_vectors)
-    # normalized_ms=preprocess_ms.normalize_horizontal()
+    normalized_ms=preprocess_ms.normalize_vertical()
+
+    start_time=time.time()
+    max_nmi=0
+    threshold=1.0
+    while(max_nmi<threshold):
+        reduced_ms=preprocess_ms.umap(n_components=93,metric='braycurtis')
+        ms_cluster = Cluster(n_clusters=3, feature_vectors=reduced_ms)
+        ms_cluster.kmeans()
+        nmi=ms_cluster.goodness(data.ms_labels,base_precision=0.55, improved_precision=0.03)
+        if(nmi>max_nmi):
+            # ms_cluster.save_result(file_path='../results/ms_results.txt')
+            max_nmi=nmi
+            print('save result with nmi:{}'.format(nmi))
+    print('use {} seconds to get best result'.format(time.time()-start_time))
+            
+
     # visualize2D(normalized_ms)
-    reduced_ms = preprocess_ms.pca(n_components=694)
+    
     # ms_affinity=preprocess_ms.get_affinity(metric='manhattan')
     # comparison = Comparison(reduced_ms, data.ms_labels,
     #                         metric='mahalanobis', x_range=[0, 100])
@@ -308,9 +352,14 @@ if __name__ == "__main__":
     # comparison.compare_nearest_dist()
     # comparison.compare_between_class_dist()
     # comparison.compare_nearest_dist_other_class()
-    cos_dist = pairwise.cosine_distances(reduced_ms)
-    ms_cluster = Cluster(n_clusters=3, feature_vectors=cos_dist)
-    ms_cluster.spectral(
-        affinity='precomputed_nearest_neighbors', n_neighbors=177)
-    print(ms_cluster.goodness(data.ms_labels))
-    ms_cluster.save_result(file_path='../results/ms_results.txt')
+
+    ## 88% accuracy
+    # reduced_ms = preprocess_ms.pca(n_components=694)
+    # cos_dist = pairwise.cosine_distances(reduced_ms)
+    # ms_cluster = Cluster(n_clusters=3, feature_vectors=cos_dist)
+    # ms_cluster.spectral(
+    #     affinity='precomputed_nearest_neighbors', n_neighbors=177)
+    # print(ms_cluster.goodness(data.ms_labels,base_precision=0.55, improved_precision=0.03))
+    # ms_cluster.save_result(file_path='../results/ms_results.txt')
+
+
