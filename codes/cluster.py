@@ -51,15 +51,15 @@ class Preprocess:
         self.data = feature_vectors
 
     def normalize_vertical(self):
-        self.data = (self.data-self.data.min()) / \
+        normalized_data = (self.data-self.data.min()) / \
             (self.data.max()-self.data.min())
-        return self.data
+        return normalized_data
 
     def normalize_horizontal(self):
         scale = self.data.max(axis=1)-self.data.min(axis=1)
-        self.data = self.data.sub(self.data.min(
+        normalized_data = self.data.sub(self.data.min(
             axis=1), axis=0).div(scale, axis=0)
-        return self.data
+        return normalized_data
 
     def get_affinity(self, metric='euclidean', with_diag=True):
         """ 
@@ -75,146 +75,25 @@ class Preprocess:
                 affinity.shape[0], -1)
         return affinity
 
-    def pca(self, n_components):
+    def pca(self, n_components, data=None):
         model = PCA(n_components=n_components)
-        reduced_data = model.fit_transform(self.data)
-        print('pca explained_variance_ratio_ is {}'.format(
-            model.explained_variance_ratio_))
-        return reduced_data
-
-    def umap(self, n_components, metric):
-        model= UMAP(n_components=n_components,metric=metric)
-        reduced_data= model.fit_transform(self.data)
-        return reduced_data
-
-def visualize2D(data):
-    """ 
-      input: 2d Data
-    """
-    # print(data.iloc[0,:])
-    plt.figure()
-    plt.plot(data.iloc[0, :])
-    plt.show()
-
-
-def visualize3D(data, labels):
-    """ 
-        input: 
-            data:3d Data
-            labels:data label
-    """
-    classes = np.unique(labels)
-    fig = plt.figure()
-    sub_fig = fig.add_subplot(111, projection='3d')
-    for class_index in classes:
-        per_class_index = labels == class_index
-        sub_fig.scatter(data[per_class_index, 0],
-                        data[per_class_index, 1], data[per_class_index, 2])
-    plt.show()
-
-
-class Comparison:
-    def __init__(self, feature_vectors, labels, metric, x_range):
-        self.feature_vectors = feature_vectors
-        self.labels = labels
-        self.metric = metric
-        self.x_range = x_range
-        self.classes = np.unique(labels)
-
-    def hist(self, data, title, row, col):
-        fig, axes = plt.subplots(row, col)
-        axes = axes.ravel()
-        for index in range(len(data)):
-            axes[index].set_title(index+1)
-            axes[index].hist(data[index], range=self.x_range, bins=25)
-        fig.suptitle(title)
-        plt.show()
-
-    def get_affinity(self, data, with_diag=True):
-        """ 
-        main purpose: compute pair distance
-        input: distance metric
-        output:distance matrix, a.k.a affinity
-        """
-        affinity = pairwise_distances(data, metric=self.metric)
-        if with_diag:
-            affinity[np.diag_indices(affinity.shape[0])] = 0
+        if data is not None:
+            reduced_data = model.fit_transform(data)
         else:
-            affinity = affinity[~np.eye(affinity.shape[0], dtype=bool)].reshape(
-                affinity.shape[0], -1)
-        return affinity
+            reduced_data = model.fit_transform(self.data)
+        # print('pca explained_variance_ratio_ is {}'.format(
+        #     model.explained_variance_ratio_))
+        return reduced_data
 
-    def compare_pair_dist(self, isShow):
-        dist_list = []
-        plot_list = []
-        # 1. all pair distance
-        # preprocessed_data=Preprocess(feature_vectors=data)
-        pair_distance = self.get_affinity(
-            data=self.feature_vectors, with_diag=False)
-        dist_list.append(pair_distance)
-        plot_list.append(pair_distance.flatten())
-        # 2. pair distance within each calss
-        classes = np.unique(self.labels)
-        for class_index in classes:
-            # preprocessed_per_class_data=Preprocess(feature_vectors=data[labels==class_index])
-            pair_distance_per_class = self.get_affinity(
-                data=self.feature_vectors[self.labels == class_index], with_diag=False)
-            dist_list.append(pair_distance_per_class)
-            plot_list.append(pair_distance_per_class.flatten())
-        if isShow:
-            self.hist(data=plot_list, title='compare_pair_dist',
-                      row=2, col=2)
-        return dist_list
+    def umap(self, n_components, metric, data=None):
+        model= UMAP(n_components=n_components,metric=metric)
+        if data is not None:
+            reduced_data = model.fit_transform(data)
+        else:
+            reduced_data = model.fit_transform(self.data)
+        return reduced_data
 
-    def compare_nearest_dist(self):
-        # dist_list = self.compare_pair_dist(isShow=False)
-        top_k = 10
-        plot_list = []
-        pair_distance = self.get_affinity(
-            data=self.feature_vectors, with_diag=False)
 
-        sorted_distance = np.sort(pair_distance, axis=1)
-        mean_nearest_dist = np.mean(sorted_distance[:, :top_k-1], axis=1)
-        for class_index in self.classes:
-            # print(mean_nearest_dist[self.labels==class_index].shape)
-            plot_list.append(mean_nearest_dist[self.labels == class_index])
-        self.hist(data=plot_list, title='compare_nearest_dist',
-                  row=2, col=2)
-        # return nearest_dist
-
-    def compare_between_class_dist(self):
-        classes = np.unique(self.labels)
-        plot_list = []
-        for exclude_class_index in classes:
-            # preprocessed_data=Preprocess(feature_vectors=data[self.labels!=exclude_class_index])
-            pair_distance_between_class = self.get_affinity(
-                data=self.feature_vectors[self.labels != exclude_class_index], with_diag=False)
-            # print(pair_distance_between_class)
-            plot_list.append(pair_distance_between_class.flatten())
-        self.hist(plot_list, title='compare_between_class_dist',
-                  row=2, col=2)
-
-    def compare_nearest_dist_other_class(self):
-        classes = np.unique(self.labels)
-        plot_list = []
-        # preprocessed_data=Preprocess(feature_vectors=data)
-        pair_distance = self.get_affinity(
-            data=self.feature_vectors, with_diag=True)
-        sorted_pair_distance_index = np.argsort(pair_distance, axis=1)
-        sorted_pair_distance_labels = np.array(
-            [self.labels[i] for i in sorted_pair_distance_index])
-        for class_index in classes:
-            nearest_dist_other_class_index = (
-                sorted_pair_distance_labels != class_index).argmax(axis=1)
-            nearest_dist_index = np.array([sorted_pair_distance_index[row, nearest_index]
-                                           for row, nearest_index in enumerate(nearest_dist_other_class_index)])
-            # print(nearest_dist_index.shape)
-            nearest_dist = np.array([pair_distance[row, nearest_index]
-                                     for row, nearest_index in enumerate(nearest_dist_index)])
-            nearest_dist_per_class = nearest_dist[self.labels == class_index]
-            plot_list.append(nearest_dist_per_class)
-        self.hist(plot_list, title='compare_nearest_dist_other_class',
-                  row=2, col=2)
 
 
 class Cluster:
@@ -270,26 +149,40 @@ class Cluster:
         return normalized_mutual_info
 
 
-def try_agglomerative_params(cluster, labels):
-    #result: ward and euclidean
-    linkages = ["ward", "complete", "average", "single"]
-    affinitys = ["euclidean", "l1", "l2", "manhattan", "cosine", "precomputed"]
-    best_result = 0
-    best_params = {'linkage': '', 'affinity': ''}
-    for linkage, affinity in product(linkages, affinitys):
-        try:
-            cluster.agglomerative(linkage=linkage, affinity=affinity)
-            result = cluster.goodness(labels)
-            if result > best_result:
-                best_result = result
-                best_params['linkage'] = linkage
-                best_params['affinity'] = affinity
-        except Exception as error:
-            print(error)
-            continue
-    print('result is coming')
-    print(best_params)
-    print(best_result)
+def visualize_median(data):
+    plt.figure()
+    plt.hist(data.median(),bins=25)
+    plt.suptitle('median distribution of each feature')
+    plt.xlabel='median'
+    plt.show()
+
+
+def visualize2D(data):
+    """ 
+      input: 2d Data
+    """
+    # print(data.iloc[0,:])
+    plt.figure()
+    plt.plot(data.iloc[0, :])
+    plt.show()
+
+
+def visualize3D(data, labels):
+    """ 
+        input: 
+            data:3d Data
+            labels:data label
+    """
+    classes = np.unique(labels)
+    fig = plt.figure()
+    sub_fig = fig.add_subplot(111, projection='3d')
+    for class_index in classes:
+        per_class_index = labels == class_index
+        sub_fig.scatter(data[per_class_index, 0],
+                        data[per_class_index, 1], data[per_class_index, 2])
+    plt.show()
+
+
 
 
 if __name__ == "__main__":
@@ -306,60 +199,50 @@ if __name__ == "__main__":
     preprocess_gene=Preprocess(feature_vectors=data.gene_feature_vectors)
     reduced_gene=preprocess_gene.pca(n_components=3)
     # Visualization
-    visualize3D(reduced_gene,data.gene_labels)
+    # visualize3D(reduced_gene,data.gene_labels)
     # K-means method for gene data
     gene_cluster.kmeans()
     nmi_kmeans=gene_cluster.goodness(data.gene_labels,base_precision=0.8, improved_precision=0.02)
-    print('nmi of kmeans is {}'.format(nmi_kmeans))
+    print('kmeans method on gene data get {}'.format(nmi_kmeans))
     # Spectral method for gene data
     gene_cluster.spectral(affinity='nearest_neighbors', n_neighbors=6)
     nmi_spectral=gene_cluster.goodness(data.gene_labels,base_precision=0.8, improved_precision=0.02)
-    print('nmi of spectral is {}'.format(nmi_spectral))
+    print('spectural method on gene data get {}'.format(nmi_spectral))
     # save spectral result
-    gene_cluster.save_result(file_path='../results/gene_results.txt')
+    # gene_cluster.save_result(file_path='../results/gene_results.txt')
     
     #--------------------------------------------------#
     #--------------------------------------------------#
     #----------------------ms_data---------------------#
     #--------------------------------------------------#
     #--------------------------------------------------#
-
+    # visualization
+    # visualize_median(data.ms_feature_vectors)
     preprocess_ms = Preprocess(feature_vectors=data.ms_feature_vectors)
     normalized_ms=preprocess_ms.normalize_vertical()
-
+    # Kmeans method
     start_time=time.time()
     max_nmi=0
-    threshold=1.0
+    threshold=0.98  # could be 1.0, flutuates between 0.97~1.0
     while(max_nmi<threshold):
-        reduced_ms=preprocess_ms.umap(n_components=93,metric='braycurtis')
+        reduced_ms=preprocess_ms.umap(n_components=93,metric='braycurtis',data=normalized_ms)
         ms_cluster = Cluster(n_clusters=3, feature_vectors=reduced_ms)
         ms_cluster.kmeans()
         nmi=ms_cluster.goodness(data.ms_labels,base_precision=0.55, improved_precision=0.03)
         if(nmi>max_nmi):
             # ms_cluster.save_result(file_path='../results/ms_results.txt')
             max_nmi=nmi
-            print('save result with nmi:{}'.format(nmi))
-    print('use {} seconds to get best result'.format(time.time()-start_time))
-            
+    print('Kmeans method on ms data get{}'.format(nmi))
+    print('use {} seconds to get result'.format(time.time()-start_time))
 
-    # visualize2D(normalized_ms)
-    
-    # ms_affinity=preprocess_ms.get_affinity(metric='manhattan')
-    # comparison = Comparison(reduced_ms, data.ms_labels,
-    #                         metric='mahalanobis', x_range=[0, 100])
-
-    # comparison.compare_pair_dist(isShow=True)
-    # comparison.compare_nearest_dist()
-    # comparison.compare_between_class_dist()
-    # comparison.compare_nearest_dist_other_class()
-
-    ## 88% accuracy
-    # reduced_ms = preprocess_ms.pca(n_components=694)
-    # cos_dist = pairwise.cosine_distances(reduced_ms)
-    # ms_cluster = Cluster(n_clusters=3, feature_vectors=cos_dist)
-    # ms_cluster.spectral(
-    #     affinity='precomputed_nearest_neighbors', n_neighbors=177)
-    # print(ms_cluster.goodness(data.ms_labels,base_precision=0.55, improved_precision=0.03))
-    # ms_cluster.save_result(file_path='../results/ms_results.txt')
+    ## Spectral method : 88% accuracy
+    reduced_ms = preprocess_ms.pca(n_components=694)
+    cos_dist = pairwise.cosine_distances(reduced_ms)
+    ms_cluster = Cluster(n_clusters=3, feature_vectors=cos_dist)
+    ms_cluster.spectral(
+        affinity='precomputed_nearest_neighbors', n_neighbors=177)
+    nmi=ms_cluster.goodness(data.ms_labels,base_precision=0.55, improved_precision=0.03)
+    print('Spectral method on ms data get{}'.format(nmi))
+    # ms_cluster.save_result(file_path='../results/ms_spectral_results.txt')
 
 
